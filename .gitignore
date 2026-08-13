@@ -1,0 +1,10 @@
+.env
+__pycache__/
+*.py[cod]
+*.log
+.pytest_cache/
+.coverage
+htmlcov/
+dist/
+# CSV source volumineux — fourni séparément
+eu_trips.csv

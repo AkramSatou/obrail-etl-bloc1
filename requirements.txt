@@ -1,0 +1,7 @@
+pandas==2.2.2
+sqlalchemy==2.0.36
+psycopg2-binary==2.9.12
+pymysql==1.1.1
+python-dotenv==1.0.1
+pytest==8.2.0
+pytest-cov==5.0.0
