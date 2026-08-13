@@ -8,3 +8,5 @@ htmlcov/
 dist/
 # CSV source volumineux — fourni séparément
 eu_trips.csv
+# Résultats générés par l'orchestrateur
+outputs/

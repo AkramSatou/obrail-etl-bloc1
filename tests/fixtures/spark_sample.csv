@@ -1,0 +1,13 @@
+trip_id,country,route_type,duration_minutes,n_stops,origin_stop_name,destination_stop_name,service_id
+1,FR,2,120,5,Paris-Nord,Bruxelles-Midi,S1
+2,FR,2,240,8,Paris-Lyon,Marseille-St-Charles,S1
+3,DE,2,90,4,Berlin-Hbf,Hamburg-Hbf,S2
+4,DE,2,180,7,Munich-Hbf,Frankfurt-Hbf,S2
+5,BE,2,60,3,Bruxelles-Midi,Gent-Sint-Pieters,S3
+6,BE,2,45,2,Bruxelles-Nord,Liege-Guillemins,S3
+7,IT,2,150,6,Milano-Centrale,Roma-Termini,S4
+8,IT,2,200,9,Roma-Termini,Napoli-Centrale,S4
+9,ES,2,170,7,Madrid-Atocha,Barcelona-Sants,S5
+10,ES,2,90,4,Barcelona-Sants,Valencia,S5
+11,FR,3,480,12,Paris-Austerlitz,Toulouse-Matabiau,S6
+12,DE,3,540,15,Berlin-Hbf,Munich-Hbf,S6
