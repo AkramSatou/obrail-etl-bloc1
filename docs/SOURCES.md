@@ -46,12 +46,12 @@ sinceTimePeriod=2020-Q1
 
 | Champ | Valeur |
 |-------|--------|
-| **URL cible** | `https://en.wikipedia.org/wiki/List_of_European_night_trains` |
+| **URL cible** | `https://en.wikipedia.org/wiki/List_of_named_passenger_trains_of_Europe` |
 | **Licence** | CC BY-SA 4.0 — https://creativecommons.org/licenses/by-sa/4.0/ |
 | **robots.txt** | `https://en.wikipedia.org/robots.txt` |
 | **Fréquence de mise à jour** | Mise à jour communautaire (Wikipedia — variable) |
-| **Contenu** | Noms des lignes de nuit, opérateurs, pays desservis |
-| **Justification** | Référentiel qualitatif des services nuit ; corrèle avec les données night_trips de l'entrepôt |
+| **Contenu** | 338 trains nommés d'Europe (nom, opérateur, itinéraire) dont les services historiques de nuit CNL, EuroNight, NightJet, etc. |
+| **Justification** | Référentiel des services ferroviaires nommés ; enrichit les données night_trips de l'entrepôt |
 | **Module** | `extractors/scraping_extractor.py` |
 
 ### Vérification robots.txt (2026-08-13)
@@ -65,19 +65,23 @@ sinceTimePeriod=2020-Q1
 #   Disallow: /wiki/Special:
 #   Allow: /
 #
-# Résultat pour /wiki/List_of_European_night_trains :
+# Résultat pour /wiki/List_of_named_passenger_trains_of_Europe :
 #   -> AUTORISÉ pour User-agent: *
+#
+# Note technique : urllib.robotparser.read() envoie une requête sans User-Agent,
+# ce que Wikipedia répond 403 — interprété comme 'Disallow tout'.
+# Correction : on récupère robots.txt via requests (avec notre User-Agent identifié)
+# puis on appelle rp.parse() manuellement. Voir scraping_extractor._robots_allows().
 
-# Vérification effectuée par :
-import urllib.robotparser
-rp = urllib.robotparser.RobotFileParser()
-rp.set_url("https://en.wikipedia.org/robots.txt")
-rp.read()
-print(rp.can_fetch("*", "https://en.wikipedia.org/wiki/List_of_European_night_trains"))
+from extractors.scraping_extractor import _robots_allows
+print(_robots_allows(
+    "https://en.wikipedia.org/robots.txt",
+    "https://en.wikipedia.org/wiki/List_of_named_passenger_trains_of_Europe"
+))
 # True
 ```
 
-La vérification est également exécutée automatiquement à chaque appel de `extract_scraping()`
+La vérification est exécutée automatiquement à chaque appel de `extract_scraping()`
 via `_robots_allows()` dans `scraping_extractor.py`.
 
 ### Politique de scraping Wikimedia
@@ -112,8 +116,8 @@ PySpark est utilisé en mode `local[*]` sur les 173 662 lignes de `eu_trips.csv`
    `.master("yarn")` — le code métier reste inchangé.
 
 3. **Agrégations** : le pipeline réalise une agrégation multi-colonnes
-   (`GROUP BY country, route_type`) et une jointure avec un référentiel pays (broadcast join),
-   opérations natives à Spark SQL.
+   (`GROUP BY country, route_type`) enrichie d'un nom de pays via `F.when()` natif
+   (équivalent d'un broadcast join, 100 % JVM — évite les Python workers sur Windows).
 
 Pandas serait suffisant à 173 000 lignes, mais Spark est justifié pédagogiquement et
 architecturalement pour la montée en charge.

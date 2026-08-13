@@ -193,3 +193,54 @@ class EtlLog(Base):
     records_updated   = Column(Integer,     default=0)
     records_rejected  = Column(Integer,     default=0)
     error_message     = Column(Text)
+
+
+# ── Sources additionnelles (C3 / C4) ─────────────────────────────────────────
+
+class EurostatRailPassenger(Base):
+    """Passagers ferroviaires trimestriels par pays — API Eurostat RAIL_PA_QUARTAL."""
+    __tablename__  = "eurostat_rail_passengers"
+    __table_args__ = _ta(
+        UniqueConstraint("country_code", "period", name="uq_eurostat_country_period"),
+    )
+
+    id           = Column(Integer,      primary_key=True, autoincrement=True)
+    country_code = Column(String(10),   nullable=False)
+    period       = Column(String(10),   nullable=False)
+    passengers_k = Column(Numeric(12, 1))
+    source_id    = Column(Integer,      ForeignKey(_fk("data_sources", "source_id")))
+    created_at   = Column(DateTime,     server_default=func.now())
+
+
+class WikipediaNamedTrain(Base):
+    """Liste des trains passagers nommés d'Europe — scraping Wikipedia."""
+    __tablename__  = "wikipedia_named_trains"
+    __table_args__ = _ta(
+        UniqueConstraint("train_name", name="uq_wikipedia_train_name"),
+    )
+
+    id         = Column(Integer,     primary_key=True, autoincrement=True)
+    train_name = Column(String(300), nullable=False)
+    operator   = Column(String(300))
+    countries  = Column(String(200))
+    source_url = Column(String(500))
+    source_id  = Column(Integer,     ForeignKey(_fk("data_sources", "source_id")))
+    created_at = Column(DateTime,    server_default=func.now())
+
+
+class SparkRouteAggregation(Base):
+    """Agrégations PySpark — trajets par pays et type de route."""
+    __tablename__  = "spark_route_aggregations"
+    __table_args__ = _ta(
+        UniqueConstraint("country", "route_type", name="uq_spark_country_route_type"),
+    )
+
+    id            = Column(Integer,      primary_key=True, autoincrement=True)
+    country       = Column(String(2),    nullable=False)
+    country_name  = Column(String(100))
+    route_type    = Column(Integer,      nullable=False)
+    nb_trajets    = Column(Integer)
+    duree_moy_min = Column(Numeric(8, 1))
+    arrets_moy    = Column(Numeric(8, 1))
+    source_id     = Column(Integer,      ForeignKey(_fk("data_sources", "source_id")))
+    created_at    = Column(DateTime,     server_default=func.now())

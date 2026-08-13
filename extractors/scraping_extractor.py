@@ -1,7 +1,7 @@
 """
 Extracteur 2 — Scraping web (BeautifulSoup)
 
-Cible  : https://en.wikipedia.org/wiki/List_of_European_night_trains
+Cible  : https://en.wikipedia.org/wiki/List_of_named_passenger_trains_of_Europe
 Licence: CC BY-SA 4.0 (Wikimedia Foundation)
 
 Vérification robots.txt :
@@ -10,6 +10,9 @@ Vérification robots.txt :
     - Disallow: /w/           (API MediaWiki)
     - Disallow: /wiki/Special:
     - /wiki/List_of_...  → AUTORISE
+  Note : rp.read() de urllib utilise urllib sans User-Agent → Wikipedia répond 403,
+  interprété comme 'Disallow tout'. On charge robots.txt via requests avec notre
+  User-Agent identifié, puis on appelle rp.parse() manuellement.
   Politique de scraping Wikimedia (https://www.mediawiki.org/wiki/API:Etiquette) :
     - Usage modéré, User-Agent identifié, pas de session authentifiée.
   Conclusion : page autorisée au scraping.
@@ -28,17 +31,28 @@ from bs4 import BeautifulSoup
 log = logging.getLogger(__name__)
 
 ROBOTS_URL = "https://en.wikipedia.org/robots.txt"
-TARGET_URL = "https://en.wikipedia.org/wiki/List_of_European_night_trains"
+TARGET_URL = "https://en.wikipedia.org/wiki/List_of_named_passenger_trains_of_Europe"
 USER_AGENT = "ObRail-ETL/1.0 (EPSI formation IA ; usage pedagogique non commercial)"
 TIMEOUT_S = 15
 
 
 def _robots_allows(robots_url: str, page_url: str, agent: str = "*") -> bool:
-    """Interroge robots.txt et retourne True si l'URL cible est autorisée."""
+    """Interroge robots.txt et retourne True si l'URL cible est autorisée.
+
+    Note : rp.read() utilise urllib sans User-Agent → Wikipedia répond 403,
+    ce que robotparser interprète comme 'Disallow tout'. On récupère donc
+    robots.txt via requests (avec notre User-Agent) avant de le parser.
+    """
     rp = urllib.robotparser.RobotFileParser()
     rp.set_url(robots_url)
     try:
-        rp.read()
+        resp = requests.get(
+            robots_url,
+            headers={"User-Agent": USER_AGENT},
+            timeout=TIMEOUT_S,
+        )
+        resp.raise_for_status()
+        rp.parse(resp.text.splitlines())
         return rp.can_fetch(agent, page_url)
     except Exception as exc:
         log.warning("[Scraping] Impossible de lire robots.txt : %s", exc)
@@ -98,7 +112,7 @@ def _parse_night_trains(html: str, source_url: str) -> pd.DataFrame:
         # On cherche une colonne "name" ou "train" et une colonne "operator"
         name_idx = _find_col(headers, ["name", "train", "service", "denomination"])
         op_idx = _find_col(headers, ["operator", "company", "exploitant"])
-        country_idx = _find_col(headers, ["country", "countries", "route", "pays"])
+        country_idx = _find_col(headers, ["country", "countries", "route", "pays", "endpoints"])
 
         for tr in table.find_all("tr")[1:]:
             cells = [td.get_text(" ", strip=True) for td in tr.find_all(["td", "th"])]

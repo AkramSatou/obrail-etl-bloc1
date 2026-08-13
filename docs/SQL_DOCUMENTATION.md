@@ -144,13 +144,20 @@ ORDER BY country, route_type;
 dans `eu_trips.csv` pour les lignes malformées. On les exclut explicitement pour éviter
 une colonne `null` dans les résultats finaux, ce qui compliquerait la jointure pays suivante.
 
-**Jointure Spark (broadcast join) :**
+**Enrichissement pays via `F.when()` (natif JVM) :**
 ```python
-enriched = agg.join(country_ref, on="country", how="left")
+_cn = (
+    F.when(F.col("country") == "AT", "Autriche")
+     .when(F.col("country") == "DE", "Allemagne")
+     ...
+     .otherwise(F.lit(None))
+)
+enriched = agg.withColumn("country_name", _cn).select(...)
 ```
-La table `country_ref` est petite (20 pays) → Spark l'envoie en broadcast automatiquement,
-évitant un shuffle réseau coûteux. Sur un vrai cluster, ce comportement est contrôlé par
-`spark.sql.autoBroadcastJoinThreshold` (défaut 10 Mo).
+Plutôt qu'un `createDataFrame()` depuis une liste Python (qui crée un Python RDD et exige
+des Python workers lors du shuffle — source d'erreurs sur Windows avec le Store Python alias),
+on utilise une chaîne `F.when()` entièrement exécutée dans la JVM Spark.
+Comportement identique à un broadcast join sur une petite dimension, sans les contraintes réseau.
 
 **`LEFT JOIN` :** Les pays non présents dans le référentiel conservent une ligne avec
 `country_name = null` plutôt que d'être supprimés (comportement prévisible et auditables).
@@ -159,7 +166,8 @@ La table `country_ref` est petite (20 pays) → Spark l'envoie en broadcast auto
 
 ## 7. Contraintes FK vérifiées dans le schéma entrepot
 
-Les 14 contraintes FK garantissent l'intégrité référentielle sans contrôles applicatifs :
+Les contraintes FK garantissent l'intégrité référentielle sans contrôles applicatifs.
+Le schéma compte désormais **11 tables** et **17 contraintes FK** après l'ajout des sources 2, 3 et 4.
 
 | Table | FK | Référence |
 |-------|----|-----------|
@@ -175,6 +183,129 @@ Les 14 contraintes FK garantissent l'intégrité référentielle sans contrôles
 | night_trips | route_id | routes.route_id |
 | night_trips | source_id | data_sources.source_id |
 | etl_logs | source_id | data_sources.source_id |
+| **eurostat_rail_passengers** | **source_id** | **data_sources.source_id** |
+| **wikipedia_named_trains** | **source_id** | **data_sources.source_id** |
+| **spark_route_aggregations** | **source_id** | **data_sources.source_id** |
 | *(+ 2 opérateurs)* | | |
 
-Test de régression FK : `tests/test_etl.py::test_contrainte_fk_rejette_stop_id_invalide`
+Tests de régression FK :
+- `tests/test_etl.py::test_contrainte_fk_rejette_stop_id_invalide`
+- `tests/test_new_tables.py::TestEurostatImport::test_contrainte_fk_source_id_invalide`
+- `tests/test_new_tables.py::TestWikipediaImport::test_contrainte_fk_source_id_invalide`
+- `tests/test_new_tables.py::TestSparkImport::test_contrainte_fk_source_id_invalide`
+
+---
+
+## 8. Modèle Merise — nouvelles tables (sources 2, 3, 4)
+
+### 8.1 `eurostat_rail_passengers` — API Eurostat
+
+**Entité :** EurostatRailPassenger (granularité : un pays × un trimestre)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    eurostat_rail_passengers                       │
+├────────────────┬──────────────┬──────────────────────────────────┤
+│ id             │ INTEGER      │ PK, séquence auto                │
+│ country_code   │ VARCHAR(10)  │ NOT NULL (ex : "DE", "FR")       │
+│ period         │ VARCHAR(10)  │ NOT NULL (ex : "2023-Q1")        │
+│ passengers_k   │ NUMERIC(12,1)│ passagers en milliers            │
+│ source_id      │ INTEGER      │ FK → data_sources.source_id      │
+│ created_at     │ TIMESTAMP    │ horodatage automatique            │
+└────────────────┴──────────────┴──────────────────────────────────┘
+  UNIQUE (country_code, period)   — une mesure par pays par trimestre
+```
+
+**Association :** `eurostat_rail_passengers [N:1] data_sources`
+
+**Justification Merise :** La granularité "pays × trimestre" justifie une table dédiée.
+Fusionner dans `day_trips` (granularité trajet par trajet) serait sémantiquement incorrect
+— Eurostat fournit un agrégat statistique national, pas un trajet individuel.
+
+**Script d'import :** `importers/eurostat_importer.py`
+
+---
+
+### 8.2 `wikipedia_named_trains` — Scraping Wikipedia
+
+**Entité :** WikipediaNamedTrain (granularité : un service de train nommé)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      wikipedia_named_trains                       │
+├────────────────┬──────────────┬──────────────────────────────────┤
+│ id             │ INTEGER      │ PK, séquence auto                │
+│ train_name     │ VARCHAR(300) │ NOT NULL (ex : "EuroNight 40")   │
+│ operator       │ VARCHAR(300) │ exploitant(s)                    │
+│ countries      │ VARCHAR(200) │ pays desservis (ex : "DE-AT-HU") │
+│ source_url     │ VARCHAR(500) │ URL Wikipedia source             │
+│ source_id      │ INTEGER      │ FK → data_sources.source_id      │
+│ created_at     │ TIMESTAMP    │ horodatage automatique            │
+└────────────────┴──────────────┴──────────────────────────────────┘
+  UNIQUE (train_name)   — un service par nom de train
+```
+
+**Association :** `wikipedia_named_trains [N:1] data_sources`
+
+**Justification Merise :** La page Wikipedia scraped liste les trains passagers
+nommés d'Europe (jour et nuit confondus — 338 entrées). Ces services sont définis
+au niveau de la ligne commerciale (opérateur + itinéraire), sans horaire individuel —
+granularité incompatible avec `night_trips` (trajet avec départ/arrivée précis).
+
+**Script d'import :** `importers/wikipedia_importer.py`
+
+---
+
+### 8.3 `spark_route_aggregations` — PySpark
+
+**Entité :** SparkRouteAggregation (granularité : pays × type de route)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    spark_route_aggregations                       │
+├────────────────┬──────────────┬──────────────────────────────────┤
+│ id             │ INTEGER      │ PK, séquence auto                │
+│ country        │ VARCHAR(2)   │ NOT NULL (code ISO-2)            │
+│ country_name   │ VARCHAR(100) │ nom complet                      │
+│ route_type     │ INTEGER      │ NOT NULL (2 = rail)              │
+│ nb_trajets     │ INTEGER      │ COUNT(*) Spark                   │
+│ duree_moy_min  │ NUMERIC(8,1) │ AVG(duration_minutes) Spark      │
+│ arrets_moy     │ NUMERIC(8,1) │ AVG(n_stops) Spark               │
+│ source_id      │ INTEGER      │ FK → data_sources.source_id      │
+│ created_at     │ TIMESTAMP    │ horodatage automatique            │
+└────────────────┴──────────────┴──────────────────────────────────┘
+  UNIQUE (country, route_type)   — un agrégat par pays et type
+```
+
+**Association :** `spark_route_aggregations [N:1] data_sources`
+
+**Justification Merise :** Ces données sont des agrégats statistiques calculés
+par PySpark (COUNT, AVG), non des trajets individuels. Les fusionner dans
+`day_trips` serait une perte d'information (on ne peut pas retrouver les
+agrégats depuis les trajets sans re-exécuter Spark).
+
+**Script d'import :** `importers/spark_importer.py`
+
+---
+
+## 9. Idempotence des nouveaux importeurs
+
+Chaque importeur suit le même pattern que `etl.py` :
+
+```sql
+-- Vider la table avant chaque insertion (idempotence)
+TRUNCATE TABLE entrepot.eurostat_rail_passengers RESTART IDENTITY CASCADE;
+-- (idem pour wikipedia_named_trains et spark_route_aggregations)
+```
+
+**Pourquoi ce CASCADE ici ?** Les nouvelles tables sont des tables "feuille"
+dans le graphe FK (aucune table ne référence leurs PK). La CASCADE est
+sans effet sur d'autres tables, mais assure la cohérence si une FK
+vers ces tables était ajoutée ultérieurement.
+
+**Interaction avec l'ETL principal :** `etl.py` tronque `data_sources` avec CASCADE,
+ce qui cascade vers les nouvelles tables (elles ont une FK vers `data_sources`).
+Ainsi, lancer `orchestrator.py` deux fois donne toujours le même état final :
+- `etl.run()` vide tout (via CASCADE sur data_sources)
+- Les importeurs rechargent leur table respective
+

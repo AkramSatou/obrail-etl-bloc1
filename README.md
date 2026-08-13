@@ -38,37 +38,44 @@ hétérogènes, les transforme et les charge dans un entrepôt PostgreSQL.
 ```
 obrail-etl-bloc1/
 ├── etl.py                  # ETL principal : CSV → PostgreSQL entrepot
-├── models.py               # Modèles SQLAlchemy (8 tables, 14 FK)
-├── orchestrator.py         # Orchestrateur 5 sources
+├── models.py               # Modèles SQLAlchemy (11 tables, 17 FK)
+├── orchestrator.py         # Orchestrateur 5 sources → toutes en base
 ├── extractors/
 │   ├── api_extractor.py    # Source 2 : API REST Eurostat
 │   ├── scraping_extractor.py # Source 3 : Wikipedia (robots.txt vérifié)
 │   ├── spark_pipeline.py   # Source 4 : PySpark local[*]
 │   └── db_extractor.py     # Source 5 : requêtes entrepot PostgreSQL
+├── importers/              # Import CSV → PostgreSQL (sources 2, 3, 4)
+│   ├── eurostat_importer.py  # → entrepot.eurostat_rail_passengers
+│   ├── wikipedia_importer.py # → entrepot.wikipedia_named_trains
+│   └── spark_importer.py     # → entrepot.spark_route_aggregations
 ├── tests/
-│   ├── conftest.py         # Fixtures pytest (schéma entrepot isolé)
-│   ├── test_etl.py         # 3 tests ETL principal (count, idempotence, FK)
-│   └── test_extractors.py  # Tests des 4 extracteurs (mocks + intégration)
+│   ├── conftest.py           # Fixtures pytest (schéma entrepot isolé)
+│   ├── test_etl.py           # 3 tests ETL principal (count, idempotence, FK)
+│   ├── test_extractors.py    # Tests 4 extracteurs (mocks + intégration)
+│   └── test_new_tables.py    # 9 tests nouvelles tables (count, idempotence, FK)
 ├── docs/
-│   ├── RGPD.md             # Registre de traitement (art. 30 RGPD)
-│   ├── SOURCES.md          # Fiche par source (URL, licence, robots.txt)
-│   └── SQL_DOCUMENTATION.md # Choix de jointure et optimisations SQL (C2)
+│   ├── RGPD.md               # Registre de traitement (art. 30 RGPD)
+│   ├── SOURCES.md            # Fiche par source (URL, licence, robots.txt)
+│   └── SQL_DOCUMENTATION.md  # Merise + choix SQL (C2)
 ├── sql/
 │   ├── 00_create_database_mysql.sql
 │   └── 01_create_schema.sql
-├── outputs/                # Résultats extracteurs (gitignored)
+├── outputs/                # CSV extracteurs + rapport_insertions.md
 └── .github/workflows/ci.yml # CI : PostgreSQL + MySQL
 ```
 
-### Sources de données (C1)
+### Sources de données (C1 / C3 / C4)
 
-| N° | Type | Source | Module |
-|----|------|--------|--------|
-| 1 | Fichier | `eu_trips.csv` (173 662 lignes) | `etl.py` |
-| 2 | API REST | Eurostat RAIL_PA_QUARTAL (JSON, open) | `extractors/api_extractor.py` |
-| 3 | Scraping | Wikipedia — trains de nuit UE | `extractors/scraping_extractor.py` |
-| 4 | Big Data | PySpark local[*] sur eu_trips.csv | `extractors/spark_pipeline.py` |
-| 5 | Base de données | Schéma `entrepot` PostgreSQL | `extractors/db_extractor.py` |
+Toutes les 5 sources sont désormais **effectivement insérées en base PostgreSQL** :
+
+| N° | Type | Source | Module extraction | Table PostgreSQL |
+|----|------|--------|-------------------|------------------|
+| 1 | CSV | `eu_trips.csv` (173 662 + 22 292 lignes) | `etl.py` | `day_trips` + `night_trips` |
+| 2 | API REST | Eurostat RAIL_PA_QUARTAL (JSON) | `extractors/api_extractor.py` | `eurostat_rail_passengers` |
+| 3 | Scraping | Wikipedia — trains passagers nommés UE | `extractors/scraping_extractor.py` | `wikipedia_named_trains` |
+| 4 | Big Data | PySpark local[*] agrégations | `extractors/spark_pipeline.py` | `spark_route_aggregations` |
+| 5 | Base de données | Schéma `entrepot` PostgreSQL | `extractors/db_extractor.py` | *(extraction seule)* |
 
 ---
 
@@ -135,11 +142,13 @@ python orchestrator.py --skip-etl
 python orchestrator.py --output-dir resultats/
 ```
 
-Les résultats sont sauvegardés en CSV dans `outputs/` :
-- `eurostat_rail_passengers.csv`
-- `wikipedia_night_trains.csv`
-- `spark_aggregations.csv`
-- `db_volumes.csv`, `db_top_routes.csv`, `db_etl_log.csv`
+Les résultats sont sauvegardés en CSV dans `outputs/` et toutes les sources
+sont insérées en base PostgreSQL :
+- `eurostat_rail_passengers.csv` → `entrepot.eurostat_rail_passengers`
+- `wikipedia_named_trains.csv` → `entrepot.wikipedia_named_trains`
+- `spark_aggregations.csv` → `entrepot.spark_route_aggregations`
+- `db_volumes.csv`, `db_top_routes.csv`, `db_etl_log.csv` *(extraction depuis l'entrepôt)*
+- `rapport_insertions.md` — récapitulatif du nombre de lignes insérées par source
 
 ### Cible MySQL (alternative)
 
@@ -175,6 +184,15 @@ tests/test_etl.py::test_comptage_lignes_chargees_egale_lignes_valides  PASSED
 tests/test_etl.py::test_deux_executions_ne_doublent_pas_les_donnees    PASSED
 tests/test_etl.py::test_contrainte_fk_rejette_stop_id_invalide         PASSED
 tests/test_extractors.py  (14 tests)                                   PASSED
+tests/test_new_tables.py::TestEurostatImport::test_comptage            PASSED
+tests/test_new_tables.py::TestEurostatImport::test_idempotence         PASSED
+tests/test_new_tables.py::TestEurostatImport::test_fk                  PASSED
+tests/test_new_tables.py::TestWikipediaImport::test_comptage           PASSED
+tests/test_new_tables.py::TestWikipediaImport::test_idempotence        PASSED
+tests/test_new_tables.py::TestWikipediaImport::test_fk                 PASSED
+tests/test_new_tables.py::TestSparkImport::test_comptage               PASSED
+tests/test_new_tables.py::TestSparkImport::test_idempotence            PASSED
+tests/test_new_tables.py::TestSparkImport::test_fk                     PASSED
 ```
 
 ---

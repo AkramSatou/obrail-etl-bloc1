@@ -1,0 +1,4 @@
+train_name,operator,countries,source_url
+EuroNight 40,DB / OBB,DE-AT-HU,https://en.wikipedia.org/wiki/List_of_European_night_trains
+Intercités de Nuit,SNCF,FR,https://en.wikipedia.org/wiki/List_of_European_night_trains
+Nightjet Wien-Paris,OBB / SNCF,AT-DE-FR,https://en.wikipedia.org/wiki/List_of_European_night_trains
