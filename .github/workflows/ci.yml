@@ -90,6 +90,9 @@ jobs:
           DB_USER: root
           DB_PASSWORD: ""
           DB_NAME: obrail_europe_db
+          CSV_DAY: tests/fixtures/eu_trips_sample.csv
+          CSV_NIGHT_EU: tests/fixtures/eu_trips_night_sample.csv
+          CSV_NIGHT_DE: tests/fixtures/de_night_sample.csv
         run: |
           python etl.py
           echo "Smoke test MySQL : OK"

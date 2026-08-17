@@ -59,9 +59,9 @@ CHUNK_SIZE = 500
 
 BASE_DIR = Path(__file__).resolve().parent
 FILES = {
-    "day":      BASE_DIR / "eu_trips.csv",
-    "night_eu": BASE_DIR / "eu_trips_night.csv",
-    "night_de": BASE_DIR / "de_night.csv",
+    "day":      Path(os.getenv("CSV_DAY",      str(BASE_DIR / "eu_trips.csv"))),
+    "night_eu": Path(os.getenv("CSV_NIGHT_EU", str(BASE_DIR / "eu_trips_night.csv"))),
+    "night_de": Path(os.getenv("CSV_NIGHT_DE", str(BASE_DIR / "de_night.csv"))),
 }
 
 # ── Données de référence (identiques à etl_obrail.py) ────────────────────────
