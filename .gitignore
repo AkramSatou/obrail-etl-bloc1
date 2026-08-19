@@ -1,12 +1,33 @@
+# Secrets
 .env
-__pycache__/
-*.py[cod]
+*.env
+
+# Donnees brutes CSV
+data/
+*.csv
+!data/.gitkeep
+
+# Sorties generees
+output/
 *.log
-.pytest_cache/
-.coverage
-htmlcov/
+*.parquet
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+*.egg-info/
 dist/
-# CSV source volumineux — fourni séparément
-eu_trips.csv
-# Résultats générés par l'orchestrateur
-outputs/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
