@@ -124,14 +124,64 @@ architecturalement pour la montée en charge.
 
 ---
 
-## Source 5 — Base de données entrepot (PostgreSQL)
+## Source 5 — Base de données OpenStreetMap (Overpass API)
+
+| Champ | Valeur |
+|-------|--------|
+| **URL** | `https://overpass-api.de/api/interpreter` |
+| **Documentation** | https://dev.overpass-api.de/overpass-doc/en/ |
+| **Licence** | ODbL (Open Database License) — https://www.openstreetmap.org/copyright |
+| **Authentification** | Aucune (service public) |
+| **Langage de requête** | Overpass QL (interrogation d'une base de données, pas un simple appel REST) |
+| **Format** | JSON (`[out:json]`) |
+| **Zone interrogée** | Gares ferroviaires de Paris intra-muros (bbox 48.80,2.25 → 48.90,2.40), pour rester léger sur un service public gratuit et partagé |
+| **Contenu** | Gares ferroviaires (nom, identifiant OSM, latitude, longitude), métro et tramway exclus |
+| **Justification** | Base de données externe et indépendante du projet, jamais alimentée par ce pipeline — c'est ce qui en fait une véritable 5e source pour le critère C1, distincte de l'API REST déjà couverte en Source 2 |
+| **Gestion des pannes** | Timeout 30s, 3 retry avec backoff exponentiel (2^n secondes), DataFrame vide si indisponible |
+| **robots.txt** | N/A (base de données interrogée en Overpass QL, pas de scraping HTML) |
+| **Module** | `extractors/osm_extractor.py` / `importers/osm_importer.py` |
+
+### Filtre métro / tramway (station=subway, station=light_rail)
+
+Le tag `railway=station` seul capte, dans la convention de balisage OSM, aussi bien les
+gares que les stations de métro et de tramway. `station=subway` est le tag obligatoire
+pour distinguer une station de métro
+(https://wiki.openstreetmap.org/wiki/Tag:station=subway) ; `station=light_rail` est
+exclu par la même logique pour les tramways.
+
+Testé le 19/08/2026 sans filtre : 300 nœuds retournés, mélangeant de vraies gares
+(Gare de Lyon, Gare Montparnasse) et des stations de métro (Châtelet, Tuileries...).
+La requête finale exclut ces deux tags :
+
+```
+[out:json][timeout:25];
+node["railway"="station"]["station"!="subway"]["station"!="light_rail"](48.80,2.25,48.90,2.40);
+out body;
+```
+
+### Politique d'usage Overpass
+
+- User-Agent identifié : `ObRail-ETL/1.0 (EPSI RNCP37827 ; usage pedagogique non commercial)`
+- Zone géographique restreinte (Paris intra-muros) plutôt que l'Europe entière
+- Pas de requêtes parallèles, usage non commercial, à faible fréquence
+- Politique commune du service : https://dev.overpass-api.de/overpass-doc/en/preface/commons.html
+
+---
+
+## Contrôle post chargement — relecture de l'entrepot (PostgreSQL)
 
 | Champ | Valeur |
 |-------|--------|
 | **Connexion** | `postgresql+psycopg2://obrail:***@localhost:5432/obrail` |
 | **Schéma** | `entrepot` (créé par etl.py) |
 | **Licence** | N/A (données internes au projet) |
-| **Fréquence** | Après chaque exécution de `etl.run()` |
+| **Fréquence** | Après chaque exécution complète de l'orchestrateur |
 | **Contenu** | Agrégats calculés sur les tables day_trips, night_trips, stops, routes, countries |
-| **Justification** | Démontre la lecture en boucle (ETL → entrepôt → extraction) et la requête SQL avancée |
+| **Justification** | Bilan de ce qui vient d'être inséré par les sources 1 à 5 ; démontre une requête SQL avancée en lecture, mais ne compte pas comme une 6e source indépendante puisqu'il relit des données que ce pipeline vient lui même de charger |
 | **Module** | `extractors/db_extractor.py` |
+
+Ce module a été la Source 5 dans une version antérieure de ce document. Reclassé ici
+le 19/08/2026 : relire l'entrepôt après l'y avoir rempli ne constitue pas une source
+externe indépendante au sens du critère C1, qui demande un mix hétérogène de sources
+*alimentant* l'entrepôt. La base Overpass/OpenStreetMap ci-dessus, jamais écrite par ce
+pipeline, en tient désormais la place.

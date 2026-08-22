@@ -74,7 +74,7 @@ def _query_volumes(conn) -> pd.DataFrame:
             COUNT(DISTINCT dt.trip_id)  AS day_trips,
             COUNT(DISTINCT nt.trip_id)  AS night_trips
         FROM entrepot.countries   c
-        LEFT JOIN entrepot.stops  s  ON s.country_id    = c.country_id
+        LEFT JOIN entrepot.stops  s  ON s.country_code  = c.country_code
         LEFT JOIN entrepot.day_trips   dt ON dt.origin_stop_id = s.stop_id
         LEFT JOIN entrepot.night_trips nt ON nt.origin_stop_id = s.stop_id
         GROUP BY c.country_code, c.country_name
@@ -114,10 +114,10 @@ def _query_etl_log(conn) -> pd.DataFrame:
     sql = text("""
         SELECT
             started_at,
-            finished_at,
+            ended_at,
             status,
-            rows_inserted,
-            rows_skipped,
+            records_inserted,
+            records_rejected,
             error_message
         FROM entrepot.etl_logs
         ORDER BY started_at DESC

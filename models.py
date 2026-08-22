@@ -244,3 +244,25 @@ class SparkRouteAggregation(Base):
     arrets_moy    = Column(Numeric(8, 1))
     source_id     = Column(Integer,      ForeignKey(_fk("data_sources", "source_id")))
     created_at    = Column(DateTime,     server_default=func.now())
+
+
+class OSMRailwayStation(Base):
+    """Gares ferroviaires (métro exclu) — Overpass API, OpenStreetMap.
+
+    Source 5 du mix demandé par le critère C1 : une vraie base de données
+    externe et indépendante du projet (un moteur de base de données
+    interrogé par un langage de requête dédié, Overpass QL), pas une
+    relecture de l'entrepôt que le pipeline vient lui même de remplir.
+    """
+    __tablename__  = "osm_railway_stations"
+    __table_args__ = _ta(
+        UniqueConstraint("osm_node_id", name="uq_osm_node_id"),
+    )
+
+    id           = Column(Integer,        primary_key=True, autoincrement=True)
+    osm_node_id  = Column(String(30),     nullable=False)
+    station_name = Column(String(300))
+    latitude     = Column(Numeric(10, 6), nullable=False)
+    longitude    = Column(Numeric(10, 6), nullable=False)
+    source_id    = Column(Integer,        ForeignKey(_fk("data_sources", "source_id")))
+    created_at   = Column(DateTime,       server_default=func.now())

@@ -1,5 +1,6 @@
 """
-Tests des extracteurs MODIF 2 (API REST, scraping, PySpark, base de données)
+Tests des extracteurs MODIF 2 (API REST, scraping, PySpark, base de données,
+base de données OpenStreetMap / Overpass API)
 
 Principes :
   - Les appels réseau sont simulés (unittest.mock) pour éviter une dépendance externe.
@@ -220,3 +221,98 @@ class TestDbExtractor:
         df = result["volumes"]
         assert "country_code" in df.columns
         assert "day_trips" in df.columns
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Source 5 — Base de données OpenStreetMap (Overpass API)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TestOsmExtractor:
+
+    def _fake_overpass_response(self) -> dict:
+        """JSON minimal imitant le format de réponse Overpass (out:json, out body)."""
+        return {
+            "elements": [
+                {"type": "node", "id": 111, "lat": 48.8443, "lon": 2.3744,
+                 "tags": {"name": "Gare de Lyon", "railway": "station"}},
+                {"type": "node", "id": 222, "lat": 48.8412, "lon": 2.3202,
+                 "tags": {"name": "Gare Montparnasse", "railway": "station"}},
+                {"type": "node", "id": 333, "lat": 48.8809, "lon": 2.3553,
+                 "tags": {"name": "Gare du Nord", "railway": "station"}},
+            ]
+        }
+
+    def test_retourne_dataframe_avec_colonnes_attendues(self):
+        """Vérifie que le parsing Overpass retourne les 4 colonnes documentées."""
+        from extractors.osm_extractor import _parse_osm_json
+        df = _parse_osm_json(self._fake_overpass_response())
+        assert set(df.columns) == {"osm_node_id", "station_name", "latitude", "longitude"}
+        assert len(df) == 3
+        assert df.iloc[0]["station_name"] == "Gare de Lyon"
+
+    def test_retourne_df_vide_si_reponse_malformee(self):
+        """Réponse JSON sans champ 'elements' → DataFrame vide, pas d'exception."""
+        from extractors.osm_extractor import extract_osm
+        fake_response = mock.MagicMock()
+        fake_response.raise_for_status.return_value = None
+        fake_response.json.return_value = {}  # manque 'elements'
+        with mock.patch("extractors.osm_extractor.requests.post", return_value=fake_response):
+            df = extract_osm(max_retries=1)
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+        assert set(df.columns) == {"osm_node_id", "station_name", "latitude", "longitude"}
+
+    def test_retry_sur_timeout_puis_df_vide(self):
+        """3 timeouts successifs → DataFrame vide retourné proprement."""
+        from extractors.osm_extractor import extract_osm
+        import requests as req
+        with mock.patch(
+            "extractors.osm_extractor.requests.post",
+            side_effect=req.exceptions.Timeout("timeout simulé"),
+        ), mock.patch("extractors.osm_extractor.time.sleep"):
+            df = extract_osm(max_retries=3)
+        assert isinstance(df, pd.DataFrame)
+        assert "osm_node_id" in df.columns
+
+    def test_erreur_reseau_retourne_df_vide(self):
+        """Erreur réseau (ConnectionError) → retry puis DataFrame vide, pas d'exception."""
+        from extractors.osm_extractor import extract_osm
+        import requests as req
+        with mock.patch(
+            "extractors.osm_extractor.requests.post",
+            side_effect=req.exceptions.ConnectionError("réseau indisponible"),
+        ), mock.patch("extractors.osm_extractor.time.sleep"):
+            df = extract_osm(max_retries=2)
+        assert isinstance(df, pd.DataFrame)
+        assert df.empty
+
+    def test_deduplique_par_node_id(self):
+        """Deux éléments partageant le même osm_node_id sont dédupliqués."""
+        from extractors.osm_extractor import _parse_osm_json
+        raw = self._fake_overpass_response()
+        raw["elements"].append(
+            {"type": "node", "id": 111, "lat": 48.8443, "lon": 2.3744,
+             "tags": {"name": "Gare de Lyon", "railway": "station"}}
+        )
+        df = _parse_osm_json(raw)
+        assert len(df) == 3  # le doublon (id 111) ne compte qu'une fois
+
+    def test_requete_exclut_station_subway_et_light_rail(self):
+        """
+        Le filtre station=subway / station=light_rail doit être présent dans la
+        requête Overpass QL envoyée : c'est ce filtre, côté serveur, qui exclut
+        les stations de métro et de tramway (testé en conditions réelles le
+        19/08/2026 : 300 nœuds sans filtre, mélangeant gares et métro).
+        """
+        from extractors.osm_extractor import QUERY_TEMPLATE, BBOX
+        query = QUERY_TEMPLATE.format(s=BBOX[0], w=BBOX[1], n=BBOX[2], e=BBOX[3])
+        assert '"station"!="subway"' in query
+        assert '"station"!="light_rail"' in query
+        assert '"railway"="station"' in query
+
+    @pytest.mark.skipif(not INTEGRATION, reason="Requiert OBRAIL_INTEGRATION=1 et accès Overpass API")
+    def test_integration_overpass_reelle(self):
+        from extractors.osm_extractor import extract_osm
+        df = extract_osm()
+        assert not df.empty
+        assert "osm_node_id" in df.columns

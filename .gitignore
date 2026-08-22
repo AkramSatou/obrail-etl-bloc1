@@ -31,3 +31,9 @@ build/
 # OS
 .DS_Store
 Thumbs.db
+
+# Config locale de l'outil Claude Code, pas partagee
+.claude/
+
+# Sorties generees par les scripts d'import (rapports, CSV reproductibles)
+outputs/

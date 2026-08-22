@@ -1,6 +1,7 @@
 """
-Tests d'intégration — 3 nouvelles tables (critères C3 / C4) :
-  eurostat_rail_passengers, wikipedia_named_trains, spark_route_aggregations
+Tests d'intégration — 4 nouvelles tables (critères C1 / C3 / C4) :
+  eurostat_rail_passengers, wikipedia_named_trains, spark_route_aggregations,
+  osm_railway_stations
 
 Pour chaque table :
   1. test_comptage   : lignes insérées == lignes valides dans le CSV fixture
@@ -203,6 +204,69 @@ class TestSparkImport:
             country="XX",
             route_type=2,
             nb_trajets=100,
+            source_id=99999,
+        ))
+        with pytest.raises(IntegrityError):
+            session.flush()
+        session.rollback()
+        session.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Table 4 — osm_railway_stations (5e source, critère C1)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+class TestOsmImport:
+
+    def test_comptage_lignes_chargees(self, pg_engine, fixture_csv_paths):
+        """
+        Le nombre de lignes insérées dans osm_railway_stations
+        correspond exactement aux lignes valides du CSV fixture (5 gares).
+        """
+        _run_etl(pg_engine, fixture_csv_paths)
+        from importers.osm_importer import import_osm
+
+        n = import_osm(engine=pg_engine, csv_path=FIXTURES / "osm_sample.csv")
+        assert n > 0, "Aucune ligne insérée dans osm_railway_stations"
+
+        with pg_engine.connect() as conn:
+            count = conn.execute(
+                text("SELECT COUNT(*) FROM entrepot.osm_railway_stations")
+            ).scalar()
+        assert count == n, f"COUNT(*) en base ({count}) != lignes insérées ({n})"
+
+    def test_idempotence_double_execution(self, pg_engine, fixture_csv_paths):
+        """
+        Deux exécutions successives de import_osm produisent le même nombre
+        de lignes — TRUNCATE + INSERT garantit l'idempotence.
+        """
+        _run_etl(pg_engine, fixture_csv_paths)
+        from importers.osm_importer import import_osm
+
+        n1 = import_osm(engine=pg_engine, csv_path=FIXTURES / "osm_sample.csv")
+        n2 = import_osm(engine=pg_engine, csv_path=FIXTURES / "osm_sample.csv")
+        assert n1 == n2, f"osm_railway_stations a doublé : {n1} → {n2}"
+
+        with pg_engine.connect() as conn:
+            count = conn.execute(
+                text("SELECT COUNT(*) FROM entrepot.osm_railway_stations")
+            ).scalar()
+        assert count == n1, "Nombre incohérent après deux exécutions"
+
+    def test_contrainte_fk_source_id_invalide(self, pg_engine, fixture_csv_paths):
+        """
+        La contrainte FK osm_railway_stations.source_id → data_sources.source_id
+        doit rejeter une insertion avec un source_id inexistant.
+        """
+        _run_etl(pg_engine, fixture_csv_paths)
+        from models import OSMRailwayStation
+
+        session = sessionmaker(bind=pg_engine)()
+        session.add(OSMRailwayStation(
+            osm_node_id="999999",
+            station_name="Gare FK Test",
+            latitude=48.85,
+            longitude=2.35,
             source_id=99999,
         ))
         with pytest.raises(IntegrityError):
